@@ -41,3 +41,9 @@ def test_every_violation_is_recorded(ws):
     ws.edit_file("tests/test_orders.py", "a", "b")
     ws.create_test("bad.py", "")
     assert len(ws.violations) == 2
+
+
+def test_test_names_are_normalized_but_still_restricted(ws):
+    assert ws.create_test("tests/test_regression_stock", "def test_x():\n    assert 1 == 1\n") == \
+        "created tests/test_regression_stock.py"
+    assert ws.create_test("conftest", "x = 1").startswith("BLOCKED")

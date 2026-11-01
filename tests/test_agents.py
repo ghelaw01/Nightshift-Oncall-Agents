@@ -62,3 +62,27 @@ def test_nothing_ships_without_human_approval():
         assert not res.approved and not g["resolved"] and g["fixed_but_not_shipped"]
     finally:
         ws.close()
+
+
+class CheatingFixer(Scripted):
+    """A fixer that writes a test asserting the buggy behavior and changes no code."""
+
+    def chat(self, system, messages, tools):
+        role = system.split("You are ")[2].split(".")[0]
+        done = [m for m in messages if m["role"] == "tool"]
+        if role == "the Fixer" and not done:
+            return Reply(None, [ToolCall("c0", "create_test", {
+                "name": "test_regression_cheat", "content": "def test_ok():\n    assert 1 + 1 == 2\n"})])
+        if role == "the Fixer":
+            return Reply('```json\n{"summary": "added a test"}\n```')
+        return super().chat(system, messages, tools)
+
+
+def test_ship_gate_blocks_a_test_only_fix_even_if_reviewer_approves():
+    ws = Workspace(INC)
+    try:
+        res = respond(ws, CheatingFixer())
+        assert not res.approved
+        assert res.review["reason"].startswith("Ship gate: no code under orders/")
+    finally:
+        ws.close()

@@ -80,7 +80,7 @@ class Agent:
 
 CONTEXT = "You are on the on-call team for the `orders` checkout service (Python). "
 
-TRIAGE = CONTEXT + """You are Triage. Read the alert and the logs, then decide:
+TRIAGE = CONTEXT + """You are Triage. Read the alert, the logs, and what shipped recently, then decide:
 - code_bug: the service code is producing wrong results or errors. A code change is needed.
 - noise: a transient or expected event (deploys, warm-up) with normal error rates. No action.
 - infra: a real problem outside the code (disks, hosts, cron). Hand to infrastructure; no code change.
@@ -167,7 +167,7 @@ def respond(ws: Workspace, model, approve: ApprovalFn = auto_approve, max_rounds
     """Run the on-call team on one incident."""
     start = time.time()
     res = Resolution(ws.incident.id)
-    res.triage = Agent("triage", TRIAGE, model, ["get_alert", "read_logs"]).run(
+    res.triage = Agent("triage", TRIAGE, model, ["get_alert", "read_logs", "recent_commits"]).run(
         ws, "A page just fired. Triage it.", res)
     if res.triage.get("category") != "code_bug":
         res.seconds = time.time() - start
@@ -185,8 +185,13 @@ def respond(ws: Workspace, model, approve: ApprovalFn = auto_approve, max_rounds
             ws, f"Incident: {ws.incident.title}\nDiagnosis: {json.dumps(res.diagnosis)}\n"
                 f"Fixer says: {json.dumps(fixer)}\nReview the change.", res)
         if res.review.get("verdict") == "approve":
-            break
-        feedback = f"\nThe reviewer rejected your last attempt: {res.review.get('reason')}. Fix that."
+            # A reviewer agent can be fooled. These checks cannot.
+            problems = ws.ship_gate()
+            if not problems:
+                break
+            res.review = {"verdict": "reject", "reason": "Ship gate: " + "; ".join(problems),
+                          "reviewer_said": res.review}
+        feedback = f"\nYour last attempt was rejected: {res.review.get('reason')}. Fix that."
 
     if res.review.get("verdict") == "approve" and approve(ws, res):
         res.approved = True
@@ -204,7 +209,7 @@ def solo_responder(ws: Workspace, model, approve: ApprovalFn = auto_approve) -> 
     out = Agent("solo", SOLO, model, tools, max_steps=25).run(ws, "A page just fired. Handle it.", res)
     res.triage = {k: out.get(k) for k in ("category", "severity", "summary")}
     res.diagnosis = {k: out.get(k) for k in ("file", "root_cause")}
-    if out.get("category") == "code_bug" and ws.changed_files() and approve(ws, res):
+    if out.get("category") == "code_bug" and ws.changed_files() and not ws.ship_gate() and approve(ws, res):
         res.approved = True
         res.commit = ws.commit_fix(f"fix({ws.incident.id}): {str(out.get('root_cause', ''))[:60]}")
     res.seconds = time.time() - start

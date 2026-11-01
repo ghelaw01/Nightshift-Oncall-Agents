@@ -134,6 +134,10 @@ class Workspace:
         return f"edited {rel}"
 
     def create_test(self, name: str, content: str) -> str:
+        # Be forgiving about the form of the name, strict about what it is.
+        name = name.strip().removeprefix("tests/")
+        if not name.endswith(".py"):
+            name += ".py"
         if not re.fullmatch(r"test_regression_[a-z0-9_]+\.py", name):
             return self._violation(f"new tests must be named tests/test_regression_<name>.py, got {name}")
         why = self._deny(content)
@@ -181,6 +185,33 @@ class Workspace:
 
     def team_tests_pass(self) -> bool:
         return pytest_run(self.repo, "tests/test_orders.py").returncode == 0
+
+    def regression_tests_fail_on_original(self) -> bool:
+        """Put the shipped code back for a moment: the new regression tests must fail on it."""
+        changed = self.changed_files()
+        tests = [f for f in changed if f.startswith("tests/test_regression_")]
+        code = [f for f in changed if f.startswith("orders/")]
+        if not tests or not code:
+            return False
+        saved = {f: (self.repo / f).read_text() for f in code}
+        try:
+            for f in code:
+                (self.repo / f).write_text(_git(self.repo, "show", f"{self.base}:{f}"))
+            return pytest_run(self.repo, *tests).returncode != 0
+        finally:
+            for f, text in saved.items():
+                (self.repo / f).write_text(text)
+
+    def ship_gate(self) -> list[str]:
+        """Checks in code that must pass before a human is even asked. Returns the failures."""
+        problems = []
+        if not any(f.startswith("orders/") for f in self.changed_files()):
+            problems.append("no code under orders/ was changed")
+        elif not self.regression_tests_fail_on_original():
+            problems.append("no regression test fails on the original code, so nothing proves the bug is fixed")
+        if pytest_run(self.repo).returncode != 0:
+            problems.append("the test suite does not pass")
+        return problems
 
     def commit_fix(self, message: str) -> str:
         _git(self.repo, "checkout", "-q", "-b", f"nightshift/{self.incident.id.lower()}")
