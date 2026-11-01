@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "night-shift"
+version = "0.1.0"
+description = "An AI on-call team: a production alert goes in, a reviewed, tested, human-approved fix comes out. With a benchmark that checks every fix against hidden tests."
+readme = "README.md"
+license = {text = "MIT"}
+authors = [{name = "Zemen Ghelaw"}]
+requires-python = ">=3.10"
+dependencies = ["openai>=1", "anthropic>=0.40", "pytest>=8"]
+keywords = ["ai-agents", "multi-agent", "sre", "incident-response", "on-call", "devops", "llm", "aiops"]
+
+[project.scripts]
+nightshift = "nightshift.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+nightshift = ["sample_service/*", "sample_service/**/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
